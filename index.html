@@ -66,6 +66,21 @@ h2 { font-family: var(--font-display); font-weight: 400; font-size: 26px; line-h
 .issue-row h2 a:hover { color: var(--gilt); }
 .issue-meta { display: grid; gap: 4px; }
 .issue-meta .sub { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+/* Finder: sticky "go to Scott No." box + decade jumps on a country page */
+.finder { position: sticky; top: 0; z-index: 5; background: var(--page); border-bottom: 1px solid var(--rule); padding: 10px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-family: var(--font-data); font-size: 13px; }
+.finder form { display: flex; align-items: center; gap: 8px; }
+.finder label { color: var(--muted); letter-spacing: .06em; white-space: nowrap; }
+.finder input { width: 7ch; font: inherit; color: var(--ink); background: var(--mount); border: 1px solid var(--rule); padding: 5px 8px; }
+.finder input:focus-visible { outline: 2px solid var(--gilt); outline-offset: 1px; }
+.finder button, .to-top { font: inherit; color: var(--gilt); background: none; border: 1px solid var(--rule); padding: 5px 10px; cursor: pointer; }
+.finder button:hover, .to-top:hover { border-color: var(--gilt); }
+.decades { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; min-width: 0; max-width: 100%; }
+.decades button { white-space: nowrap; }
+.find-msg { flex-basis: 100%; color: var(--muted); margin: 0; }
+.find-msg:empty { display: none; }
+.find-msg a { color: var(--gilt); }
+.to-top { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 18px; z-index: 6; background: var(--page); font-family: var(--font-data); font-size: 13px; }
+.to-top[hidden] { display: none; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .thumbs a { display: block; }
 .thumbs img { height: 74px; width: auto; display: block; box-shadow: 0 4px 12px rgba(0,0,0,.5); transition: transform .15s ease; }
@@ -723,11 +738,23 @@ function contents(c) {
       <p class="lede">${count(c.stamps.length)} from the family collection, ${c.blurb}. Choose an issue to page through its stamps, or go straight to a stamp from the <a href="#${c.code}/index">stamp index</a>.</p>
       <nav class="jump"><a href="#${c.code}/index">Stamp index →</a></nav>
     </div>
+    <div class="finder" id="finder">
+      <form id="find" autocomplete="off">
+        <label for="find-no">Go to ${esc(c.catalog)} No.</label>
+        <input id="find-no" inputmode="text" enterkeyhint="go" placeholder="725" aria-describedby="find-msg">
+        <button type="submit">Go</button>
+      </form>
+      <nav class="decades" aria-label="Jump to decade">
+        ${decades(c).map(([d, i]) => `<button type="button" data-to="iss-${i.key}">${d}s</button>`).join("")}
+        <button type="button" data-to="end">End ↓</button>
+      </nav>
+      <p class="find-msg" id="find-msg" aria-live="polite"></p>
+    </div>
     <div class="block">
       <p class="label">Issues</p>
       <div class="issues">
         ${c.issues.map(i => `
-          <div class="issue-row">
+          <div class="issue-row" id="iss-${i.key}">
             <div class="issue-meta">
               <h2><a href="#${c.code}/issue-${i.key}">${esc(i.name)}</a></h2>
               <span class="sub">${esc(i.printer)} · ${count(i.stamps.length)}${i.missing.length ? ` · ${i.missing.length} wanting` : ""}</span>
@@ -737,6 +764,48 @@ function contents(c) {
       </div>
     </div>
 `;
+}
+
+// First issue (in album order) of each decade, for the jump bar.
+function decades(c) {
+  const seen = new Map();
+  for (const i of c.issues) { const d = Math.floor(parseInt(i.key, 10) / 10) * 10; if (d && !seen.has(d)) seen.set(d, i); }
+  return [...seen].sort((a, b) => a[0] - b[0]);
+}
+
+// Scroll so a target sits just below the sticky finder bar.
+function scrollToEl(el) {
+  const bar = document.getElementById("finder");
+  const y = el.getBoundingClientRect().top + scrollY - (bar ? bar.offsetHeight : 0) - 8;
+  scrollTo({ top: Math.max(0, y), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+function wireFinder(c) {
+  const form = document.getElementById("find");
+  if (!form) return;
+  const input = document.getElementById("find-no"), msg = document.getElementById("find-msg");
+  form.addEventListener("submit", e => {
+    e.preventDefault();
+    const q = input.value.trim().replace(/^(sc\.?|scott)\s*/i, "").toLowerCase();
+    if (!q) return;
+    if (q in c.byNo) { location.hash = `#${c.code}/sc-${q}`; return; }
+    const major = q.replace(/[a-z]+$/, "");
+    const home = c.issues.find(i => i.missing.some(m => m.toLowerCase() === q || m.toLowerCase() === major));
+    if (home) {
+      msg.innerHTML = `Sc. ${esc(q)} isn't in the album yet. It belongs to the <a href="#${c.code}/issue-${home.key}">${esc(home.name)}</a>, where it's on the wanting list.`;
+    } else {
+      const n = parseInt(q, 10);
+      const near = Number.isNaN(n) ? null : c.ordered.find(s => parseInt(s.n, 10) >= n);
+      msg.innerHTML = `Sc. ${esc(q)} isn't in the album.${near ? ` The next number in the album is <a href="#${c.code}/sc-${near.n}">Sc. ${near.n}</a>.` : ""}`;
+    }
+  });
+  input.addEventListener("input", () => { msg.textContent = ""; });
+  document.querySelector(".decades").addEventListener("click", e => {
+    const b = e.target.closest("button[data-to]");
+    if (!b) return;
+    const el = b.dataset.to === "end" ? view.querySelector(".issues .issue-row:last-child") : document.getElementById(b.dataset.to);
+    if (el) scrollToEl(el);
+  });
 }
 
 function indexPage(c) {
@@ -847,8 +916,31 @@ function route() {
     ? `<a href="#world">World</a> · <a href="#${c.code}">${esc(c.name)} contents</a> · <a href="#${c.code}/index">Stamp index</a><br>${c.source}`
     : `Map: Natural Earth, via world-atlas.`;
   if (!html) wireMap();
-  window.scrollTo(0, 0);
+  if (c && html && !page) {
+    wireFinder(c);
+    // Coming back to a country page from a stamp or issue returns you to where you were in the list.
+    const saved = scrollMem[location.hash];
+    window.scrollTo(0, saved || 0);
+    if (saved) requestAnimationFrame(() => window.scrollTo(0, saved));
+  } else window.scrollTo(0, 0);
 }
+
+// Remember how far down each page you were, so Back / "United States" returns to the same spot.
+const scrollMem = {};
+let memKey = location.hash;
+addEventListener("hashchange", () => { memKey = location.hash; }, true);
+addEventListener("scroll", () => {
+  scrollMem[memKey] = scrollY;
+  toTop.hidden = scrollY < innerHeight * 1.5;
+}, { passive: true });
+
+const toTop = document.createElement("button");
+toTop.className = "to-top";
+toTop.type = "button";
+toTop.textContent = "↑ Top";
+toTop.hidden = true;
+toTop.addEventListener("click", () => scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
+document.body.append(toTop);
 
 function wireMap() {
   const map = document.getElementById("map"), tip = document.getElementById("tip");
