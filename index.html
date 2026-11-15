@@ -738,23 +738,12 @@ function contents(c) {
       <p class="lede">${count(c.stamps.length)} from the family collection, ${c.blurb}. Choose an issue to page through its stamps, or go straight to a stamp from the <a href="#${c.code}/index">stamp index</a>.</p>
       <nav class="jump"><a href="#${c.code}/index">Stamp index →</a></nav>
     </div>
-    <div class="finder" id="finder">
-      <form id="find" autocomplete="off">
-        <label for="find-no">Go to ${esc(c.catalog)} No.</label>
-        <input id="find-no" inputmode="text" enterkeyhint="go" placeholder="725" aria-describedby="find-msg">
-        <button type="submit">Go</button>
-      </form>
-      <nav class="decades" aria-label="Jump to decade">
-        ${decades(c).map(([d, i]) => `<button type="button" data-to="iss-${i.key}">${d}s</button>`).join("")}
-        <button type="button" data-to="end">End ↓</button>
-      </nav>
-      <p class="find-msg" id="find-msg" aria-live="polite"></p>
-    </div>
+    ${finderBar(c, "iss")}
     <div class="block">
       <p class="label">Issues</p>
       <div class="issues">
         ${c.issues.map(i => `
-          <div class="issue-row" id="iss-${i.key}">
+          <div class="issue-row jt" id="iss-${i.key}">
             <div class="issue-meta">
               <h2><a href="#${c.code}/issue-${i.key}">${esc(i.name)}</a></h2>
               <span class="sub">${esc(i.printer)} · ${count(i.stamps.length)}${i.missing.length ? ` · ${i.missing.length} wanting` : ""}</span>
@@ -771,6 +760,23 @@ function decades(c) {
   const seen = new Map();
   for (const i of c.issues) { const d = Math.floor(parseInt(i.key, 10) / 10) * 10; if (d && !seen.has(d)) seen.set(d, i); }
   return [...seen].sort((a, b) => a[0] - b[0]);
+}
+
+// Sticky finder bar shared by the country page and the stamp index; `prefix` names the jump targets' ids on that page.
+function finderBar(c, prefix) {
+  return `
+    <div class="finder" id="finder">
+      <form id="find" autocomplete="off">
+        <label for="find-no">Go to ${esc(c.catalog)} No.</label>
+        <input id="find-no" inputmode="text" enterkeyhint="go" placeholder="725" aria-describedby="find-msg">
+        <button type="submit">Go</button>
+      </form>
+      <nav class="decades" aria-label="Jump to decade">
+        ${decades(c).map(([d, i]) => `<button type="button" data-to="${prefix}-${i.key}">${d}s</button>`).join("")}
+        <button type="button" data-to="end">End ↓</button>
+      </nav>
+      <p class="find-msg" id="find-msg" aria-live="polite"></p>
+    </div>`;
 }
 
 // Scroll so a target sits just below the sticky finder bar.
@@ -803,7 +809,8 @@ function wireFinder(c) {
   document.querySelector(".decades").addEventListener("click", e => {
     const b = e.target.closest("button[data-to]");
     if (!b) return;
-    const el = b.dataset.to === "end" ? view.querySelector(".issues .issue-row:last-child") : document.getElementById(b.dataset.to);
+    const jts = view.querySelectorAll(".jt");
+    const el = b.dataset.to === "end" ? jts[jts.length - 1] : document.getElementById(b.dataset.to);
     if (el) scrollToEl(el);
   });
 }
@@ -816,8 +823,9 @@ function indexPage(c) {
       <h1>Stamp Index</h1>
       <p class="lede">Every stamp in the ${esc(c.name)} section, by issue and ${esc(c.catalog)} number. Choose a stamp to see its front, back and history.</p>
     </div>
+    ${finderBar(c, "idx")}
     ${c.issues.map(i => `
-      <div class="block index-group">
+      <div class="block index-group jt" id="idx-${i.key}">
         <div class="issue-head">
           <h2><a href="#${c.code}/issue-${i.key}">${esc(i.name)}</a></h2>
           <span class="sub">${esc(i.printer)} · ${count(i.stamps.length)}</span>
@@ -916,9 +924,9 @@ function route() {
     ? `<a href="#world">World</a> · <a href="#${c.code}">${esc(c.name)} contents</a> · <a href="#${c.code}/index">Stamp index</a><br>${c.source}`
     : `Map: Natural Earth, via world-atlas.`;
   if (!html) wireMap();
-  if (c && html && !page) {
+  if (c && html && (!page || page === "index")) {
     wireFinder(c);
-    // Coming back to a country page from a stamp or issue returns you to where you were in the list.
+    // Coming back to the country page or stamp index from a stamp or issue returns you to where you were in the list.
     const saved = scrollMem[location.hash];
     window.scrollTo(0, saved || 0);
     if (saved) requestAnimationFrame(() => window.scrollTo(0, saved));
